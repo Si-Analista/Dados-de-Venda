@@ -1,0 +1,130 @@
+use ARBOR_TORREFACAO
+----------------------------------------------------------------------
+--Criar Dimensao vendas
+CREATE TABLE DIM_LOCAL
+(
+	ID  INT IDENTITY NOT NULL,
+	Cliente VARCHAR(20),
+	Endereco VARCHAR(MAX),
+	CEP VARCHAR(10),
+	Cidade VARCHAR (20),
+	Estado VARCHAR (10)
+);
+
+	ALTER TABLE DIM_LOCAL
+	ADD CONSTRAINT PK_tb_dim_local PRIMARY KEY (ID)
+----------------------------------------------------------------------
+	--Inserir dados com ajustes que o arquivo trouxe
+BEGIN TRAN
+INSERT INTO DIM_LOCAL
+SELECT
+	Empresa AS Cliente,
+	REPLACE(Endereco,'""','')  + ' '+Bairro as Endereco,
+	REPLACE(CEP,'"""','') as CEP,	
+	PARSENAME(REPLACE(Cidade, '-', '.'), 2) AS Cidade,
+	PARSENAME(REPLACE(Cidade, '-', '.'), 1) AS Estado
+FROM endereco_clientes
+END
+
+Select * from DIM_LOCAL
+
+--Adicionar a coluna bairro e ajustar o campo
+----------------------------------------------------------------------
+ALTER TABLE DIM_LOCAL
+	ADD Bairro VARCHAR (50);
+
+UPDATE DIM_LOCAL
+	SET Bairro = RIGHT(endereco, CHARINDEX('-',REVERSE(endereco)));
+UPDATE DIM_LOCAL
+	SET Bairro = REPLACE(bairro,'- ','')
+
+----------------------------------------------------------------------
+--Ajustar tabela tirando linhas com NULL
+	
+DELETE 
+from Vendasfonte 
+where Empresa IS NULL AND Produto IS NULL
+---------------------------------------------------------------------------
+-- Criar a dimensao Produto
+
+DROP TABLE DIM_PRODUTO
+
+CREATE TABLE DIM_PRODUTO
+(
+	ID  INT IDENTITY NOT NULL,
+	Categoria VARCHAR(20),
+	Produto VARCHAR(20),
+	Embalagem VARCHAR(10),
+	Preço_Un NUMERIC(12,2) ,
+	Embalagem_g INT
+);
+
+	ALTER TABLE DIM_PRODUTO
+	ADD CONSTRAINT PK_tb_dim_produto PRIMARY KEY (ID)
+
+
+BEGIN TRAN
+INSERT INTO DIM_PRODUTO
+SELECT
+	CASE
+	WHEN Produto LIKE '%chá%' THEN 'CHÁ'
+	ELSE 'CAFÉ'
+	END as Categoria,
+	Produto,
+	Embalagem,
+	CAST(REPLACE(Valor_Un, ',', '.') AS DECIMAL(10,2)),
+	CAST(CASE 
+	 WHEN Embalagem = '1kg' THEN 1000
+	 WHEN Embalagem = '250gr' THEN 250
+	 WHEN Embalagem = '500g' THEN 500
+	 WHEN Embalagem = '500gr' THEN 500
+	 WHEN Embalagem = '50gr' THEN 50
+END AS INT)
+from Vendasfonte
+GROUP BY Produto,Embalagem,Valor_Un
+COMMIT TRAN
+
+SELECT*FROM DIM_LOCAL
+
+
+CREATE TABLE FATO_VENDAS 
+(
+    ID INT IDENTITY(1, 1),
+    Data_pedido DATE,
+    IDLocal INT, -- Chave Estrangeira para Dimlocal
+    IDProduto INT, -- Chave Estrangeira para DimProduto
+    Qtd NUMERIC (10,2),
+	Prazo VARCHAR (50),
+	Pago CHAR (3),
+	Data_pagamento DATE
+	
+	CONSTRAINT PK_V PRIMARY KEY (ID),
+	CONSTRAINT FK_L FOREIGN KEY (IDLocal) REFERENCES DIM_LOCAL(ID),
+	CONSTRAINT FK_P FOREIGN KEY (IDProduto) REFERENCES DIM_PRODUTO(ID)
+);
+
+
+BEGIN TRAN
+INSERT INTO FATO_VENDAS 
+SELECT 
+	Vendasfonte.Data_Pedido,
+	Vendasfonte.Empresa,
+	DIM_LOCAL.ID,
+	DIM_PRODUTO.ID,
+	Vendasfonte.Produto,
+	Vendasfonte.Embalagem,
+	Vendasfonte.Tipo,
+	Vendasfonte.Valor_Un,
+    Vendasfonte.Valor_total,
+	Vendasfonte.Entregue,
+    Vendasfonte.Forma_de_Pagamento,
+	Vendasfonte.NF,
+	Vendasfonte.QTD,
+	Vendasfonte.Prazo,
+	Vendasfonte.Pago,
+	Vendasfonte.Data_Pagamento
+FROM Vendasfonte,DIM_LOCAL,DIM_PRODUTO
+JOIN DIM_LOCAL AS L ON Vendasfonte.IDLocal=L.ID
+JOIN DIM_PRODUTO AS P ON Vendasfonte.IDProduto=P.ID    
+COMMIT TRAN
+	
